@@ -2,7 +2,7 @@ enable_testing()
 set(CMAKE_CTEST_COMMAND ctest -V)
 add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND})
 
-add_dependencies(check ear)
+add_dependencies(check grizzly-ear)
 
 
 message(STATUS "Looking for lit")
@@ -15,7 +15,7 @@ if (LIT_EXECUTABLE)
 endif()
 
 if(LIT_FOUND)
-  set(EAR_EXE ${CMAKE_BINARY_DIR}/bear/bear)
+  set(EAR_EXE ${CMAKE_BINARY_DIR}/bear/grizzly-bear)
   set(EAR_LIB ${CMAKE_BINARY_DIR}/libear/${EAR_LIB_FILE})
 
   add_test(NAME func_test

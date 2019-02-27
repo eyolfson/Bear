@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8)
 
-project(bear C)
+project(grizzly-bear C)
 set(BEAR_VERSION "2.3.13")
 
 include(GNUInstallDirs)
@@ -22,8 +22,8 @@ endif()
 
 set(CMAKE_OSX_ARCHITECTURES "i386;x86_64" CACHE STRING  "Rogue")
 
-set(EAR_LIB_FILE ${CMAKE_SHARED_LIBRARY_PREFIX}ear${CMAKE_SHARED_LIBRARY_SUFFIX})
-set(EAR_LIB_PATH "${CMAKE_INSTALL_LIBDIR}/bear")
+set(EAR_LIB_FILE ${CMAKE_SHARED_LIBRARY_PREFIX}grizzly-ear${CMAKE_SHARED_LIBRARY_SUFFIX})
+set(EAR_LIB_PATH "${CMAKE_INSTALL_LIBDIR}/grizzly-bear")
 set(DEFAULT_PRELOAD_FILE ${CMAKE_INSTALL_PREFIX}/${EAR_LIB_PATH}/${EAR_LIB_FILE} CACHE STRING "Default path to libear.")
 
 add_subdirectory(libear)
@@ -31,7 +31,7 @@ add_subdirectory(bear)
 add_subdirectory(test)
 add_subdirectory(man)
 
-set(CPACK_PACKAGE_NAME "bear")
+set(CPACK_PACKAGE_NAME "grizzly-bear")
 set(CPACK_PACKAGE_CONTACT "László Nagy")
 set(CPACK_PACKAGE_VENDOR ${CPACK_PACKAGE_CONTACT})
 set(CPACK_PACKAGE_VERSION ${BEAR_VERSION})
