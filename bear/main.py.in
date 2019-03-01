@@ -122,7 +122,8 @@ Execution = collections.namedtuple('Execution', ['pid', 'cwd', 'cmd'])
 
 CompilationCommand = collections.namedtuple(
     'CompilationCommand',
-    ['compiler', 'language', 'phase', 'flags', 'files', 'output'])
+    ['compiler', 'language', 'phase', 'flags', 'files', 'output',
+     'object_files'])
 
 
 class Category:
@@ -433,7 +434,7 @@ def create_intercept_parser():
     parser.add_argument(
         '--cdb', '-o',
         metavar='<file>',
-        default="compile_commands.json",
+        default="compilation_commands.json",
         help="""The JSON compilation database.""")
     parser.add_argument(
         '--use-cc',
@@ -478,11 +479,12 @@ def create_intercept_parser():
 
 class Compilation:
     def __init__(self,
-                 compiler, language, phase, flags, source, directory, output):
+                 kind, compiler, language, phase, flags, source, directory, output):
         """ Constructor for a single compilation.
 
         This method just normalize the paths and initialize values. """
 
+        self.kind = kind
         self.compiler = compiler
         self.language = language
         self.phase = phase
@@ -490,7 +492,8 @@ class Compilation:
         self.directory = os.path.normpath(directory)
         self.source = source if os.path.isabs(source) else \
             os.path.normpath(os.path.join(self.directory, source))
-        self.output = output
+        self.output = output if os.path.isabs(output) else \
+            os.path.normpath(os.path.join(self.directory, output))
 
     def __hash__(self):
         # type: (Compilation) -> int
@@ -510,14 +513,17 @@ class Compilation:
         # type: (Compilation) -> Dict[str, Any]
         """ This method creates a compilation database entry. """
 
-        source = os.path.relpath(self.source, self.directory)
-        output = ['-o', self.output] if self.output else []
-        return {
-            'file': source,
-            'arguments':
-                [self.compiler, self.phase] + self.flags + output + [source],
-            'directory': self.directory
+        # source = os.path.relpath(self.source, self.directory)
+        # output = ['-o', self.output] if self.output else []
+        result = {
+            'kind': self.kind,
+            'file': self.source,
+            'directory': self.directory,
+            'output': self.output,
         }
+        if self.kind == 'compile':
+            result['arguments'] = [self.compiler, self.phase] + self.flags + [self.source]
+        return result
 
     @classmethod
     def from_db_entry(cls, entry, category):
@@ -549,13 +555,35 @@ class Compilation:
         for source in candidate.files if candidate else []:
             output = candidate.output[0] if candidate.output else None
             phase = candidate.phase[0] if candidate.phase else '-c'
-            result = Compilation(directory=execution.cwd,
+            if output is None:
+                if phase is None:
+                    output = 'a.out'
+                elif phase == '-c':
+                    assert(len(candidate.files) == 1)
+                    root, extension = os.path.splitext(source)
+                    output = '{}.o'.format(root)
+                    # print('output', output)
+            result = Compilation(kind='compile',
+                                 directory=execution.cwd,
                                  source=source,
                                  compiler=candidate.compiler,
                                  language=candidate.language,
                                  phase=phase,
                                  flags=candidate.flags,
                                  output=output)
+            if os.path.isfile(result.source):
+                yield result
+
+        for source in candidate.object_files if candidate else []:
+            assert len(candidate.output) == 1
+            result = Compilation(directory=execution.cwd,
+                                 source=source,
+                                 kind='link',
+                                 compiler=candidate.compiler,
+                                 language=None,
+                                 phase=None,
+                                 flags=None,
+                                 output=candidate.output[0])
             if os.path.isfile(result.source):
                 yield result
 
@@ -592,6 +620,19 @@ class Compilation:
         return None
 
     @classmethod
+    def _split_linker(cls, command):
+        if command:
+            executable = os.path.basename(command[0])
+            if executable != 'ar':
+                return None
+            if 't' in command[1] or 'x' in command[1]: # TODO, keep track of extract?
+                return None
+            assert('c' in command[1] or 'r' in command[1])
+            assert('d' not in command[1])
+            parameters = command[2:]
+            return 'ar', parameters
+
+    @classmethod
     def _split_command(cls, command, category):
         """ Returns a value when the command is a compilation, None otherwise.
 
@@ -603,7 +644,23 @@ class Compilation:
         # quit right now, if the program was not a C/C++ compiler
         compiler_and_arguments = cls._split_compiler(command, category)
         if compiler_and_arguments is None:
-            return None
+            linker_and_arguments = cls._split_linker(command)
+            if linker_and_arguments is None:
+                return None
+            result = CompilationCommand(compiler=linker_and_arguments[0],
+                                        language=None,
+                                        phase=[],
+                                        flags=[],
+                                        files=[],
+                                        object_files=[],
+                                        output=[])
+            # iterate on the compile options
+            args = iter(linker_and_arguments[1])
+            result.output.append(next(args))
+            for arg in args:
+                if re.match(r'^[^-].+', arg) and classify_object(arg):
+                    result.object_files.append(arg)
+            return result
 
         # the result of this method
         result = CompilationCommand(compiler=compiler_and_arguments[0],
@@ -611,6 +668,7 @@ class Compilation:
                                     phase=[],
                                     flags=[],
                                     files=[],
+                                    object_files=[],
                                     output=[])
         # iterate on the compile options
         args = iter(compiler_and_arguments[2])
@@ -636,12 +694,14 @@ class Compilation:
             # parameter which looks source file is taken...
             elif re.match(r'^[^-].+', arg) and classify_source(arg):
                 result.files.append(arg)
+            elif re.match(r'^[^-].+', arg) and classify_object(arg):
+                result.object_files.append(arg)
             # and consider everything else as compile option.
             else:
                 result.flags.append(arg)
         logging.debug('output is: %s', result)
         # do extra check on number of source files
-        return result if result.files else None
+        return result if result.files or result.object_files else None
 
 
 class CompilationDatabase:
@@ -709,6 +769,9 @@ def classify_source(filename, c_compiler=True):
     __, extension = os.path.splitext(os.path.basename(filename))
     return mapping.get(extension)
 
+def classify_object(filename):
+    __, extension = os.path.splitext(os.path.basename(filename))
+    return extension in ['.a', '.o']
 
 def get_mpi_call(wrapper):
     # type: (str) -> List[str]
